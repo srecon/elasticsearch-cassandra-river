@@ -75,20 +75,64 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
     @Override
     public void start() {
-        logger.info("Cassandra River Start!!");
+        logger.info("Cassandra River Start!!" + "batch size {}", getBatchSize());
         // read data from Cassandra by paging
 
         // executor to index
         ThreadFactory daemonThreadFactory = new ThreadFactoryBuilder().setNameFormat("Queue-Indexer-thread-%d").setDaemon(false).build();
-        threadExecutor = Executors.newFixedThreadPool(10, daemonThreadFactory);
+        threadExecutor = Executors.newCachedThreadPool();//newFixedThreadPool(10, daemonThreadFactory);
         //while(true){
         //    if(closed){
         //        return;
         //    }
-        CassandraCFData cfData =  cassandraFactory.getData(getColumnFamily(),getBatchSize());
-        threadExecutor.execute(new Indexer(getBatchSize(),cfData, getTypeName(), getIndexName()));
+        //CassandraCFData cfData =  cassandraFactory.getData(getColumnFamily(),getBatchSize());
+        // get Session
+        Session session =  cassandraFactory.getSession();
 
-        //}
+        String SQL = "select * from " + getColumnFamily() +" ALLOW FILTERING;";
+        PreparedStatement statement = session.prepare(SQL);
+
+        BoundStatement bndStm = new BoundStatement(statement);
+        bndStm.setFetchSize(batchSize);
+
+        ResultSet result = session.execute(bndStm.bind());
+        Iterator ite = result.iterator();
+
+        //CassandraCFData cfData = new CassandraCFData();
+        Map<String, Map<String, String>>  values = new HashMap<String, Map<String, String>>();
+        int cnt =0;
+        while(ite.hasNext()){
+            Row row = (Row) ite.next();
+            cnt++;
+            //values = new HashMap<String, Map<String, String>>();
+            ColumnDefinitions columnDefinitions =  row.getColumnDefinitions();
+            String rowId = UUID.randomUUID().toString();
+            Map<String, String> rows = new HashMap<String, String>();
+
+            //logger.info("Column defination:{}", columnDefinitions);
+            for(int i = 0; i < columnDefinitions.size(); i++){
+                String columnName = columnDefinitions.getName(i);
+                String columnValue="";
+                DataType dataType = columnDefinitions.getType(i);
+
+                columnValue = CassandraFactory.getStringValue(dataType, row, columnName);
+
+                rows.put(columnName, columnValue);
+            }
+            values.put(rowId, rows);
+            if(values.size() >= getBatchSize()){
+                logger.info("values Size: {}", values.size());
+                threadExecutor.execute(new Indexer(getBatchSize(),values, getTypeName(), getIndexName()));
+                values.clear();
+            }
+            //values.clear();
+            //rows.clear();
+        }
+        logger.info("CNT {}", cnt);
+        if(values.size() < getBatchSize()){
+            threadExecutor.execute(new Indexer(getBatchSize(),values, getTypeName(), getIndexName()));
+        }
+        //threadExecutor.execute(new Indexer(getBatchSize(),cfData, getTypeName(), getIndexName()));
     }
 
     @Override
@@ -99,26 +143,27 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
     }
     public class Indexer implements Runnable{
         private final int batchSize;
-        private final CassandraCFData data;
+        //private final CassandraCFData data;
+        private final Map<String, Map<String, String>> keys;
         private final String typeName;
         private final String indexName;
 
-        public Indexer(int batchSize, CassandraCFData keys, String typeName, String indexName) {
+        public Indexer(int batchSize, Map<String, Map<String, String>> keys, String typeName, String indexName) {
             this.batchSize = batchSize;
-            this.data = keys;
+            this.keys = keys;
             this.typeName = typeName;
             this.indexName = indexName;
         }
 
         @Override
         public void run() {
-            logger.info("Starting thread with Data {}", this.data.getData().size());
+            logger.info("Starting thread with Data {}", this.keys.size());
             // get Bulk from client
             BulkRequestBuilder bulk = client.prepareBulk();
             // fill bulk
-            for(String key : this.data.getData().keySet()){
+            for(String key : this.keys.keySet()){
                 bulk.add(Requests.indexRequest(this.indexName).type(this.typeName)
-                                                              .id(key).source(this.data.getData().get(key)));
+                                                              .id(key).source(this.keys.get(key)));
                 //if(bulk.numberOfActions() >= this.batchSize){
                     saveToEs(bulk);
                     //bulk = client.prepareBulk();

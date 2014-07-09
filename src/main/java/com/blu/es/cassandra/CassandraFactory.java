@@ -59,7 +59,7 @@ public class CassandraFactory {
         return new CassandraFactory(keySpaceName, hostName, port, dcName);
     }
 
-    private static Session getSession() {
+    public Session getSession() {
         return session;
     }
     public void shutdown(){
@@ -90,25 +90,20 @@ public class CassandraFactory {
             Map<String, String> rows = new HashMap<String, String>();
 
             LOGGER.info("Column defination:{}", columnDefinitions);
-            // by column
             for(int i = 0; i < columnDefinitions.size(); i++){
                 String columnName = columnDefinitions.getName(i);
                 String columnValue="";
                 DataType dataType = columnDefinitions.getType(i);
-                //LOGGER.info("DataType:{}", dataType.getName());
 
                 columnValue = getStringValue(dataType, row, columnName);
 
-                //LOGGER.info("Column Name:" + columnName +"|"+ "Column value:"+ columnValue);
-                // add to map
                 rows.put(columnName, columnValue);
             }
             values.put(rowId, rows);
-            //LOGGER.info("Row:{}", row);
         }
         return cfData;
     }
-    private static String getStringValue(DataType dataType, Row row, String columnName){
+    public static String getStringValue(DataType dataType, Row row, String columnName){
         String value= "";
         if (dataType == null){
             return value;
