@@ -26,8 +26,6 @@ import java.util.concurrent.ThreadFactory;
  */
 public class CassandraRiver extends AbstractRiverComponent implements River {
     private static final String SETTINGS_KEY_CASSAANDRA="cassandra";
-    private static final String DATA_TYPE_TIMESTAMP="timestamp";
-    private static final String DATA_TYPE_BOOLEAN="boolean";
 
 
     private String hostName;
@@ -44,7 +42,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
     private ExecutorService threadExecutor;
     private volatile boolean closed;
-
+    private CassandraFactory cassandraFactory;
 
 
     @Inject
@@ -61,7 +59,6 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             this.hostName = XContentMapValues.nodeStringValue(couchSettings.get("hosts"), "192.168.202.115,192.168.202.116");
             this.dcName =  XContentMapValues.nodeStringValue(couchSettings.get("dcName"), "MNPANDC");
         }
-        //@todo add index section
         if (settings.settings().containsKey("index")) {
             @SuppressWarnings("unchecked")
             Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("index");
@@ -72,49 +69,15 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             this.indexName = "DEFAULT_INDEX_NAME";
             this.typeName = "DEFAULT_TYPE_NAME";
         }
+        // init factory
+        cassandraFactory = CassandraFactory.getInstance(getKeySpace(), getHostName(), getPort(), getDcName());
     }
 
     @Override
     public void start() {
         logger.info("Cassandra River Start!!");
         // read data from Cassandra by paging
-        CassandraConnectionFactory factory = new CassandraConnectionFactory(getKeySpace(), getHostName(), getPort(), getDcName());
-        Session session =  factory.getSession();
-        String SQL = "select * from " + getColumnFamily() +" ALLOW FILTERING;";
-        PreparedStatement statement = session.prepare(SQL);
 
-        BoundStatement bndStm = new BoundStatement(statement);
-        bndStm.setFetchSize(20000);
-
-        ResultSet result = session.execute(bndStm.bind());
-        Iterator ite = result.iterator();
-
-        CassandraCFData cfData = new CassandraCFData();
-        Map<String, Map<String, String>>  values = cfData.getData();
-
-        while(ite.hasNext()){
-            Row row = (Row) ite.next();
-            ColumnDefinitions columnDefinitions =  row.getColumnDefinitions();
-            String rowId = UUID.randomUUID().toString();
-            Map<String, String> rows = new HashMap<String, String>();
-
-            logger.info("Column defination:{}", columnDefinitions);
-            // by column
-            for(int i = 0; i < columnDefinitions.size(); i++){
-                String columnName = columnDefinitions.getName(i);
-                String columnValue="";
-                DataType dataType =  columnDefinitions.getType(i);
-                logger.info("DataType:{}", dataType.getName());
-
-                columnValue = getStringValue(dataType, row, columnName);
-
-                logger.info("Column Name:" + columnName +"|"+ "Column value:"+ columnValue);
-                // add to map
-                rows.put(columnName, columnValue);
-            }
-            values.put(rowId, rows);
-            logger.info("Row:{}", row);
-        }
         // executor to index
         ThreadFactory daemonThreadFactory = new ThreadFactoryBuilder().setNameFormat("Queue-Indexer-thread-%d").setDaemon(false).build();
         threadExecutor = Executors.newFixedThreadPool(10, daemonThreadFactory);
@@ -122,18 +85,17 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
         //    if(closed){
         //        return;
         //    }
-            threadExecutor.execute(new Indexer(getBatchSize(),cfData, getTypeName(), getIndexName()));
+        CassandraCFData cfData =  cassandraFactory.getData(getColumnFamily(),getBatchSize());
+        threadExecutor.execute(new Indexer(getBatchSize(),cfData, getTypeName(), getIndexName()));
 
         //}
-
-        // @todo shutdown cluster only on close
-        //factory.shutdown();
     }
 
     @Override
     public void close() {
         logger.info("Cassandra River Close!!");
         //client.admin().indices().prepareDeleteMapping("_river").setType("cassandra-river").execute();
+        cassandraFactory.shutdown();
     }
     public class Indexer implements Runnable{
         private final int batchSize;
@@ -173,23 +135,6 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                 }
             });
         }
-    }
-    private static String getStringValue(DataType dataType, Row row, String columnName){
-        String value= "";
-        if (dataType == null){
-            return value;
-        }
-        if(dataType.getName().toString().equalsIgnoreCase(DATA_TYPE_TIMESTAMP)){
-            Date date = row.getDate(columnName);
-            value = date!=null ? date.toString() :"";
-        } else if(dataType.getName().toString().equalsIgnoreCase(DATA_TYPE_BOOLEAN)){
-            Boolean boolValue =  row.getBool(columnName);
-            value = boolValue.toString();
-        } else{
-            value = row.getString(columnName);
-        }
-
-        return value;
     }
 
     public String getHostName() {
