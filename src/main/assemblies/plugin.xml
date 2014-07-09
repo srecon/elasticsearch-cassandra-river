@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<assembly>
+    <id>plugin</id>
+    <formats>
+        <format>zip</format>
+    </formats>
+    <includeBaseDirectory>false</includeBaseDirectory>
+    <dependencySets>
+        <dependencySet>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>com.blu.es:cassandra-river</include>
+                <!--<include>org.apache.cassandra:cassandra-all</include>
+                <include>org.apache.cassandra:cassandra-thrift</include>
+                <include>org.apache.thrift:libthrift</include>-->
+                <include>com.datastax.cassandra:cassandra-driver-core</include>
+                <include>org.xerial.snappy:snappy-java</include>
+                <include>net.jpountz.lz4:lz4</include>
+                <include>io.netty:netty</include>
+                <include>com.google.guava:guava</include>
+                <include>com.codahale.metrics:metrics-core</include>
+                <include>org.slf4j:*</include>
+
+                <include>commons-lang:commons-lang</include>
+                <include>commons-pool:*</include>
+                <!--<include>org.hectorclient:hector-core</include>-->
+                <include>org.apache.httpcomponents:*</include>
+                <include>com.fasterxml.jackson.core:*</include>
+            </includes>
+        </dependencySet>
+    </dependencySets>
+</assembly>
