@@ -16,6 +16,7 @@
                 <include>io.netty:netty</include>
                 <include>com.google.guava:guava</include>
                 <include>com.codahale.metrics:metrics-core</include>
+                <include>org.quartz-scheduler:quartz</include>
                 <include>org.slf4j:*</include>
             </includes>
         </dependencySet>

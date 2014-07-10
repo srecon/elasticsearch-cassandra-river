@@ -11,6 +11,9 @@ import org.elasticsearch.river.AbstractRiverComponent;
 import org.elasticsearch.river.River;
 import org.elasticsearch.river.RiverName;
 import org.elasticsearch.river.RiverSettings;
+import org.quartz.*;
+import org.quartz.impl.StdSchedulerFactory;
+import org.quartz.spi.ThreadExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,7 +28,8 @@ import java.util.concurrent.ThreadFactory;
  * Time: 14:28
  */
 public class CassandraRiver extends AbstractRiverComponent implements River {
-    private static final String SETTINGS_KEY_CASSAANDRA="cassandra";
+    private static final String SETTINGS_KEY_CASSANDRA="cassandra";
+    private static final Logger LOGGER = LoggerFactory.getLogger(CassandraRiver.class);
 
 
     private String hostName;
@@ -33,24 +37,24 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
     private String port;
     private String clusterName;
     private String keySpace;
-    private String columnFamily;
-    private int batchSize;
-    private Client client;
+    private static String columnFamily;
+    private static int batchSize;
+    private static Client client;
 
-    private String typeName;
-    private String indexName;
+    private static String typeName;
+    private static String indexName;
+    private String cron;
 
-    private ExecutorService threadExecutor;
-    private volatile boolean closed;
-    private CassandraFactory cassandraFactory;
+    private static CassandraFactory cassandraFactory;
 
 
     @Inject
+    @SuppressWarnings("unchecked")
     protected CassandraRiver(RiverName riverName, RiverSettings settings, Client client) {
         super(riverName, settings);
         this.client = client;
         // read settings
-        if(settings != null && settings.settings().containsKey(SETTINGS_KEY_CASSAANDRA)){
+        if(settings != null && settings.settings().containsKey(SETTINGS_KEY_CASSANDRA)){
             Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("cassandra");
             this.clusterName = XContentMapValues.nodeStringValue(couchSettings.get("cluster_name"), "CRM-MNP Cluster");
             this.keySpace = XContentMapValues.nodeStringValue(couchSettings.get("keyspace"), "mnpkeyspace");
@@ -58,9 +62,9 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             this.batchSize = XContentMapValues.nodeIntegerValue(couchSettings.get("batch_size"), 1000);
             this.hostName = XContentMapValues.nodeStringValue(couchSettings.get("hosts"), "192.168.202.115,192.168.202.116");
             this.dcName =  XContentMapValues.nodeStringValue(couchSettings.get("dcName"), "MNPANDC");
+            this.cron = XContentMapValues.nodeStringValue(couchSettings.get("cron"), "0/30 * * * * ?"); // DEFAULT every 30 second
         }
-        if (settings.settings().containsKey("index")) {
-            @SuppressWarnings("unchecked")
+        if ( settings!=null &&  settings.settings().containsKey("index")) {
             Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("index");
             this.indexName = XContentMapValues.nodeStringValue(couchSettings.get("index"), "DEFAULT_INDEX_NAME");
             this.typeName = XContentMapValues.nodeStringValue(couchSettings.get("type"), "DEFAULT_TYPE_NAME");
@@ -75,79 +79,93 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
     @Override
     public void start() {
-        logger.info("Cassandra River Start!!" + "batch size {}", getBatchSize());
+        LOGGER.info("Cassandra River Start!!" + "batch size {}", getBatchSize());
 
-        // executor to index
-        ThreadFactory daemonThreadFactory = new ThreadFactoryBuilder().setNameFormat("Queue-Indexer-thread-%d").setDaemon(false).build();
-        threadExecutor = Executors.newFixedThreadPool(10, daemonThreadFactory);
-        //while(true){
-        //    if(closed){
-        //        return;
-        //    }
-        //CassandraCFData cfData =  cassandraFactory.getData(getColumnFamily(),getBatchSize());
-        // get Session
-        Session session =  cassandraFactory.getSession();
+        JobDetail jobDetail = JobBuilder.newJob(RiverJOb.class).withIdentity("River Job","river").build();
+        //trigger
+        Trigger trigger = TriggerBuilder.newTrigger()
+                .withIdentity("RiverTrigger", "river")
+                .withSchedule(CronScheduleBuilder.cronSchedule(getCron()))
+                .build();
+        // schedule
+        Scheduler scheduler;
+        try {
+            scheduler = new StdSchedulerFactory().getScheduler();
+            scheduler.start();
+            scheduler.scheduleJob(jobDetail, trigger);
 
-        String SQL = "select * from " + getColumnFamily() +" ALLOW FILTERING;";
-        PreparedStatement statement = session.prepare(SQL);
-
-        BoundStatement bndStm = new BoundStatement(statement);
-        bndStm.setFetchSize(batchSize);
-
-        ResultSet result = session.execute(bndStm.bind());
-        Iterator ite = result.iterator();
-
-        //CassandraCFData cfData = new CassandraCFData();
-        Map<String, Map<String, String>>  values = new HashMap<String, Map<String, String>>();
-        int cnt =0;
-        while(ite.hasNext()){
-            Row row = (Row) ite.next();
-            //values = new HashMap<String, Map<String, String>>();
-            ColumnDefinitions columnDefinitions =  row.getColumnDefinitions();
-            String rowId = UUID.randomUUID().toString();
-            Map<String, String> rows = new HashMap<String, String>();
-
-            //logger.info("Column defination:{}", columnDefinitions);
-            for(int i = 0; i < columnDefinitions.size(); i++){
-                String columnName = columnDefinitions.getName(i);
-                String columnValue="";
-                DataType dataType = columnDefinitions.getType(i);
-
-                columnValue = CassandraFactory.getStringValue(dataType, row, columnName);
-
-                rows.put(columnName, columnValue);
-            }
-            values.put(rowId, rows);
-            if(values.size() >= getBatchSize()){
-                logger.info("values Size: {}", values.size());
-                // copy hash map
-                Map<String, Map<String, String>>  tmpValues = new HashMap<String, Map<String, String>>();
-                tmpValues.putAll(values);
-                threadExecutor.execute(new Indexer(getBatchSize(),tmpValues, getTypeName(), getIndexName()));
-                values = new HashMap<String, Map<String, String>>();
-            }
-            //values.clear();
-            //rows.clear();
-            cnt++;
-        }
-        logger.info("CNT {}", cnt);
-
-        if(values.size() < getBatchSize()){
-            threadExecutor.execute(new Indexer(getBatchSize(),values, getTypeName(), getIndexName()));
+        } catch (SchedulerException e) {
+            LOGGER.info("Scheduler Exception {}", e);
         }
 
-        //threadExecutor.execute(new Indexer(getBatchSize(),cfData, getTypeName(), getIndexName()));
     }
 
     @Override
     public void close() {
-        logger.info("Cassandra River Close!!");
+        LOGGER.info("Cassandra River Close!!");
         client.admin().indices().prepareDeleteMapping("_river").setType("cassandra-river").execute();
         cassandraFactory.shutdown();
     }
-    public class Indexer implements Runnable{
+
+    // Quartz Job
+    public static class RiverJOb implements Job{
+        public RiverJOb() {     }
+
+        @Override
+        public void execute(JobExecutionContext jobExecutionContext) throws JobExecutionException {
+            LOGGER.info("Quartz Job ");
+            // executor to index
+            ThreadFactory daemonThreadFactory = new ThreadFactoryBuilder().setNameFormat("Queue-Indexer-thread-%d").setDaemon(false).build();
+            ExecutorService threadExecutor = Executors.newFixedThreadPool(20, daemonThreadFactory);
+
+            Session session =  cassandraFactory.getSession();
+
+            String SQL = "select * from " + getColumnFamily() +" ALLOW FILTERING;";
+            PreparedStatement statement = session.prepare(SQL);
+
+            BoundStatement bndStm = new BoundStatement(statement);
+            bndStm.setFetchSize(batchSize);
+
+            ResultSet result = session.execute(bndStm.bind());
+            Iterator ite = result.iterator();
+
+            //CassandraCFData cfData = new CassandraCFData();
+            Map<String, Map<String, String>>  values = new HashMap<String, Map<String, String>>();
+            while(ite.hasNext()){
+                Row row = (Row) ite.next();
+                //values = new HashMap<String, Map<String, String>>();
+                ColumnDefinitions columnDefinitions =  row.getColumnDefinitions();
+                String rowId = UUID.randomUUID().toString();
+                Map<String, String> rows = new HashMap<String, String>();
+
+                //logger.info("Column defination:{}", columnDefinitions);
+                for(int i = 0; i < columnDefinitions.size(); i++){
+                    String columnName = columnDefinitions.getName(i);
+                    String columnValue="";
+                    DataType dataType = columnDefinitions.getType(i);
+
+                    columnValue = CassandraFactory.getStringValue(dataType, row, columnName);
+
+                    rows.put(columnName, columnValue);
+                }
+                values.put(rowId, rows);
+                if(values.size() >= getBatchSize()){
+                    // copy hash map
+                    Map<String, Map<String, String>>  tmpValues = new HashMap<String, Map<String, String>>();
+                    tmpValues.putAll(values);
+                    threadExecutor.execute(new Indexer(getBatchSize(),tmpValues, getTypeName(), getIndexName()));
+                    values = new HashMap<String, Map<String, String>>();
+                }
+            }
+            if(values.size() < getBatchSize()){
+                threadExecutor.execute(new Indexer(getBatchSize(),values, getTypeName(), getIndexName()));
+            }
+
+        }
+    }
+
+    private static class Indexer implements Runnable{
         private final int batchSize;
-        //private final CassandraCFData data;
         private final Map<String, Map<String, String>> keys;
         private final String typeName;
         private final String indexName;
@@ -161,35 +179,30 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
         @Override
         public void run() {
-            logger.info("Starting thread with Data {}, batch size {}", this.keys.size(), this.batchSize);
-            // get Bulk from client
+            LOGGER.info("Starting thread with Data {}, batch size {}", this.keys.size(), this.batchSize);
             BulkRequestBuilder bulk = client.prepareBulk();
-            // fill bulk
-            int cnt =0;
             for(String key : this.keys.keySet()){
                 try{
                     bulk.add(Requests.indexRequest(this.indexName).type(this.typeName)
                             .id(key).source(this.keys.get(key)));
 
                 } catch(Exception e){
-                    logger.error("Exception in run {}", e);
+                    LOGGER.error("Exception in run {}", e);
                 }
-                cnt++;
             }
-            logger.info("Bulk cnt {}", cnt);
             saveToEs(bulk);
         }
         private boolean saveToEs(BulkRequestBuilder bulkRequestBuilder){
-            logger.info("Inserting {} keys in ES", bulkRequestBuilder.numberOfActions());
+            LOGGER.info("Inserting {} keys in ES", bulkRequestBuilder.numberOfActions());
             try{
                 bulkRequestBuilder.execute().addListener(new Runnable() {
                     @Override
                     public void run() {
-                        logger.info("Processing Done!!");
+                        LOGGER.info("Processing Done!!");
                     }
                 });
             } catch(Exception e){
-                logger.info("Exception in persistance {}", e);
+                LOGGER.info("Exception in persistance {}", e);
             }
                 return false;
             }
@@ -236,7 +249,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
         this.keySpace = keySpace;
     }
 
-    public String getColumnFamily() {
+    public static String getColumnFamily() {
         return columnFamily;
     }
 
@@ -244,7 +257,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
         this.columnFamily = columnFamily;
     }
 
-    public int getBatchSize() {
+    public static int getBatchSize() {
         return batchSize;
     }
 
@@ -252,11 +265,15 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
         this.batchSize = batchSize;
     }
 
-    public String getTypeName() {
+    public static String getTypeName() {
         return typeName;
     }
 
-    public String getIndexName() {
+    public static String getIndexName() {
         return indexName;
+    }
+
+    public String getCron() {
+        return cron;
     }
 }

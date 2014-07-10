@@ -24,12 +24,6 @@ public class CassandraFactory {
     private static final String DATA_TYPE_TIMESTAMP="timestamp";
     private static final String DATA_TYPE_BOOLEAN="boolean";
 
-/*
-    private String keySpaceName;
-    private String hostName;
-    private String port;
-    private String dcName;
-*/
 
     private CassandraFactory() {    }
     private CassandraFactory(String keySpaceName, String hostName, String port, String dcName){
@@ -38,7 +32,6 @@ public class CassandraFactory {
 
         poolingOptions.setCoreConnectionsPerHost(HostDistance.LOCAL,10);
         poolingOptions.setMaxConnectionsPerHost(HostDistance.LOCAL, 50);
-
 
         //cluster = Cluster.builder().addContactPoints(hostName).withCompression(ProtocolOptions.Compression.SNAPPY)
         cluster = Cluster.builder().addContactPoints(hostName)
@@ -68,41 +61,9 @@ public class CassandraFactory {
             LOGGER.info("Cluster shutting down!!");
         }
     }
-    public CassandraCFData getData(final String cfName, final int batchSize){
-        // read data from Cassandra by paging
-
-        String SQL = "select * from " + cfName +" ALLOW FILTERING;";
-        PreparedStatement statement = getSession().prepare(SQL);
-
-        BoundStatement bndStm = new BoundStatement(statement);
-        bndStm.setFetchSize(batchSize);
-
-        ResultSet result = getSession().execute(bndStm.bind());
-        Iterator ite = result.iterator();
-
-        CassandraCFData cfData = new CassandraCFData();
-        Map<String, Map<String, String>>  values = cfData.getData();
-
-        while(ite.hasNext()){
-            Row row = (Row) ite.next();
-            ColumnDefinitions columnDefinitions =  row.getColumnDefinitions();
-            String rowId = UUID.randomUUID().toString();
-            Map<String, String> rows = new HashMap<String, String>();
-
-            LOGGER.info("Column defination:{}", columnDefinitions);
-            for(int i = 0; i < columnDefinitions.size(); i++){
-                String columnName = columnDefinitions.getName(i);
-                String columnValue="";
-                DataType dataType = columnDefinitions.getType(i);
-
-                columnValue = getStringValue(dataType, row, columnName);
-
-                rows.put(columnName, columnValue);
-            }
-            values.put(rowId, rows);
-        }
-        return cfData;
-    }
+    /**
+     * Convert Cassandra data type to String
+     * */
     public static String getStringValue(DataType dataType, Row row, String columnName){
         String value= "";
         if (dataType == null){
