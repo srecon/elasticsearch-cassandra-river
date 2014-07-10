@@ -76,11 +76,10 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
     @Override
     public void start() {
         logger.info("Cassandra River Start!!" + "batch size {}", getBatchSize());
-        // read data from Cassandra by paging
 
         // executor to index
         ThreadFactory daemonThreadFactory = new ThreadFactoryBuilder().setNameFormat("Queue-Indexer-thread-%d").setDaemon(false).build();
-        threadExecutor = Executors.newCachedThreadPool();//newFixedThreadPool(10, daemonThreadFactory);
+        threadExecutor = Executors.newFixedThreadPool(10, daemonThreadFactory);
         //while(true){
         //    if(closed){
         //        return;
@@ -103,7 +102,6 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
         int cnt =0;
         while(ite.hasNext()){
             Row row = (Row) ite.next();
-            cnt++;
             //values = new HashMap<String, Map<String, String>>();
             ColumnDefinitions columnDefinitions =  row.getColumnDefinitions();
             String rowId = UUID.randomUUID().toString();
@@ -122,23 +120,29 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             values.put(rowId, rows);
             if(values.size() >= getBatchSize()){
                 logger.info("values Size: {}", values.size());
-                threadExecutor.execute(new Indexer(getBatchSize(),values, getTypeName(), getIndexName()));
-                values.clear();
+                // copy hash map
+                Map<String, Map<String, String>>  tmpValues = new HashMap<String, Map<String, String>>();
+                tmpValues.putAll(values);
+                threadExecutor.execute(new Indexer(getBatchSize(),tmpValues, getTypeName(), getIndexName()));
+                values = new HashMap<String, Map<String, String>>();
             }
             //values.clear();
             //rows.clear();
+            cnt++;
         }
         logger.info("CNT {}", cnt);
+
         if(values.size() < getBatchSize()){
             threadExecutor.execute(new Indexer(getBatchSize(),values, getTypeName(), getIndexName()));
         }
+
         //threadExecutor.execute(new Indexer(getBatchSize(),cfData, getTypeName(), getIndexName()));
     }
 
     @Override
     public void close() {
         logger.info("Cassandra River Close!!");
-        //client.admin().indices().prepareDeleteMapping("_river").setType("cassandra-river").execute();
+        client.admin().indices().prepareDeleteMapping("_river").setType("cassandra-river").execute();
         cassandraFactory.shutdown();
     }
     public class Indexer implements Runnable{
@@ -157,29 +161,39 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
         @Override
         public void run() {
-            logger.info("Starting thread with Data {}", this.keys.size());
+            logger.info("Starting thread with Data {}, batch size {}", this.keys.size(), this.batchSize);
             // get Bulk from client
             BulkRequestBuilder bulk = client.prepareBulk();
             // fill bulk
+            int cnt =0;
             for(String key : this.keys.keySet()){
-                bulk.add(Requests.indexRequest(this.indexName).type(this.typeName)
-                                                              .id(key).source(this.keys.get(key)));
-                //if(bulk.numberOfActions() >= this.batchSize){
-                    saveToEs(bulk);
-                    //bulk = client.prepareBulk();
-                //}
-            }
-        }
-        private void saveToEs(BulkRequestBuilder bulkRequestBuilder){
-            logger.info("Inserting {} keys in ES", bulkRequestBuilder.numberOfActions());
+                try{
+                    bulk.add(Requests.indexRequest(this.indexName).type(this.typeName)
+                            .id(key).source(this.keys.get(key)));
 
-            bulkRequestBuilder.execute().addListener(new Runnable() {
-                @Override
-                public void run() {
-                    logger.info("Processing Done!!");
+                } catch(Exception e){
+                    logger.error("Exception in run {}", e);
                 }
-            });
+                cnt++;
+            }
+            logger.info("Bulk cnt {}", cnt);
+            saveToEs(bulk);
         }
+        private boolean saveToEs(BulkRequestBuilder bulkRequestBuilder){
+            logger.info("Inserting {} keys in ES", bulkRequestBuilder.numberOfActions());
+            try{
+                bulkRequestBuilder.execute().addListener(new Runnable() {
+                    @Override
+                    public void run() {
+                        logger.info("Processing Done!!");
+                    }
+                });
+            } catch(Exception e){
+                logger.info("Exception in persistance {}", e);
+            }
+                return false;
+            }
+
     }
 
     public String getHostName() {

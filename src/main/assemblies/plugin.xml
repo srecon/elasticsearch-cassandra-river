@@ -17,12 +17,6 @@
                 <include>com.google.guava:guava</include>
                 <include>com.codahale.metrics:metrics-core</include>
                 <include>org.slf4j:*</include>
-
-                <!--<include>commons-lang:commons-lang</include>
-                <include>commons-pool:*</include>
-                <include>org.hectorclient:hector-core</include>
-                <include>org.apache.httpcomponents:*</include>
-                <include>com.fasterxml.jackson.core:*</include>-->
             </includes>
         </dependencySet>
     </dependencySets>
