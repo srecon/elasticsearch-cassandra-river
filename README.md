@@ -43,4 +43,4 @@ http://HOST:PORT/_plugin/head/
 ##Improvments
 1. Tests
 2. Update records
-3. Add only changes row in ES  
+3. Add only changed row in ES  
