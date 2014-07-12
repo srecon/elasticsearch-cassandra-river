@@ -44,7 +44,7 @@ http://HOST:PORT/_plugin/head/
 
 
 ##Improvments
-1. Add update Tests
+1. Add unit Tests
 2. Update records
 3. Add newly added rows in ES by date
 4. Add multi tables support  
