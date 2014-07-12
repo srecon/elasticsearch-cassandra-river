@@ -56,12 +56,12 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
         // read settings
         if(settings != null && settings.settings().containsKey(SETTINGS_KEY_CASSANDRA)){
             Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("cassandra");
-            this.clusterName = XContentMapValues.nodeStringValue(couchSettings.get("cluster_name"), "CRM-MNP Cluster");
-            this.keySpace = XContentMapValues.nodeStringValue(couchSettings.get("keyspace"), "mnpkeyspace");
-            this.columnFamily = XContentMapValues.nodeStringValue(couchSettings.get("column_family"), "event_log");
-            this.batchSize = XContentMapValues.nodeIntegerValue(couchSettings.get("batch_size"), 1000);
-            this.hostName = XContentMapValues.nodeStringValue(couchSettings.get("hosts"), "192.168.202.115,192.168.202.116");
-            this.dcName =  XContentMapValues.nodeStringValue(couchSettings.get("dcName"), "MNPANDC");
+            this.clusterName = XContentMapValues.nodeStringValue(couchSettings.get("cluster_name"), "Test Cluster");
+            this.keySpace = XContentMapValues.nodeStringValue(couchSettings.get("keyspace"), "default");
+            this.columnFamily = XContentMapValues.nodeStringValue(couchSettings.get("column_family"), "cities");
+            this.batchSize = XContentMapValues.nodeIntegerValue(couchSettings.get("batch_size"), 10000);
+            this.hostName = XContentMapValues.nodeStringValue(couchSettings.get("hosts"), "localhost");
+            this.dcName =  XContentMapValues.nodeStringValue(couchSettings.get("dcName"), "TESTDC");
             this.cron = XContentMapValues.nodeStringValue(couchSettings.get("cron"), "0/30 * * * * ?"); // DEFAULT every 30 second
         }
         if ( settings!=null &&  settings.settings().containsKey("index")) {
