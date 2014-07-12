@@ -85,6 +85,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
         //trigger
         Trigger trigger = TriggerBuilder.newTrigger()
                 .withIdentity("RiverTrigger", "river")
+                .startNow()
                 .withSchedule(CronScheduleBuilder.cronSchedule(getCron()))
                 .build();
         // schedule
@@ -108,12 +109,13 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
     }
 
     // Quartz Job
+    @DisallowConcurrentExecution
     public static class RiverJOb implements Job{
         public RiverJOb() {     }
 
         @Override
         public void execute(JobExecutionContext jobExecutionContext) throws JobExecutionException {
-            LOGGER.info("Quartz Job ");
+            LOGGER.info("Quartz Job");
             // executor to index
             ThreadFactory daemonThreadFactory = new ThreadFactoryBuilder().setNameFormat("Queue-Indexer-thread-%d").setDaemon(false).build();
             ExecutorService threadExecutor = Executors.newFixedThreadPool(20, daemonThreadFactory);

@@ -10,7 +10,10 @@ Elasticsearch river for Cassandra 2.* with CQL support, based on data pull from 
 build : mvn clean install
 
 install:
+
 copy target/releases/cassandra-river-1.0-SNAPSHOT.zip into $ELASTICSEARCH_HOME/plugin/cassandra-river
+  or
+./plugin --url file:/river/cassandra-river-1.0-SNAPSHOT.zip --install cassandra-river
 
 remove:
  ./plugin --remove cassandra-river
