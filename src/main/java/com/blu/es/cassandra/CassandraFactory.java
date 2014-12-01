@@ -79,14 +79,85 @@ public class CassandraFactory {
             return value;
         }
 
-        if(dataType.getName().toString().equalsIgnoreCase(DATA_TYPE_TIMESTAMP)){
-            Date date = row.getDate(columnName);
-            value = date!=null ? date.toString() :"";
-        } else if(dataType.getName().toString().equalsIgnoreCase(DATA_TYPE_BOOLEAN)){
-            Boolean boolValue =  row.getBool(columnName);
-            value = boolValue.toString();
-        } else{
-            value = row.getString(columnName);
+        switch(dataType.getName()) {
+            case BIGINT:
+            case COUNTER: {
+                Long raw = row.getLong(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case BLOB: {
+                ByteBuffer raw = row.getBytes(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case BOOLEAN: {
+                Boolean raw = row.getBool(columnName);
+                value = raw.toString();
+                break;
+            }
+            case DECIMAL: {
+                BigDecimal raw = row.getDecimal(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case DOUBLE: {
+                Double raw = row.getDouble(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case FLOAT: {
+                Float raw = row.getFloat(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case INET: {
+                InetAddress raw = row.getInet(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case INT: {
+                Integer raw = row.getInt(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case LIST: {
+                List<DataType> typeArgs = dataType.getTypeArguments();
+                List<?> raw = row.getList(columnName, typeArgs.get(0).asJavaClass());
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case MAP: {
+                List<DataType> typeArgs = dataType.getTypeArguments();
+                Map<?, ?> raw = row.getMap(columnName, typeArgs.get(0).asJavaClass(), typeArgs.get(1).asJavaClass());
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case SET: {
+                List<DataType> typeArgs = dataType.getTypeArguments();
+                Set<?> raw = row.getSet(columnName, typeArgs.get(0).asJavaClass());
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case TIMESTAMP: {
+                Date raw = row.getDate(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case TIMEUUID:
+            case UUID: {
+                UUID raw = row.getUUID(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            case VARINT: {
+                BigInteger raw = row.getVarint(columnName);
+                value = raw != null ? raw.toString() : "";
+                break;
+            }
+            default: { // Column types VARCHAR, TEXT or ASCII.
+                value = row.getString(columnName);
+            }
         }
         return value;
     }
