@@ -2,6 +2,7 @@ package com.blu.es.cassandra;
 
 import com.blu.es.plugin.river.CassandraRiverPlugin;
 import com.datastax.driver.core.*;
+
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.client.*;
 import org.elasticsearch.common.inject.Inject;
@@ -38,6 +39,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
     private String clusterName;
     private String keySpace;
     private static String columnFamily;
+    private static List<String> primaryKey;
     private static int batchSize;
     private static Client client;
 
@@ -59,6 +61,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             this.clusterName = XContentMapValues.nodeStringValue(couchSettings.get("cluster_name"), "Test Cluster");
             this.keySpace = XContentMapValues.nodeStringValue(couchSettings.get("keyspace"), "default");
             this.columnFamily = XContentMapValues.nodeStringValue(couchSettings.get("column_family"), "cities");
+            this.primaryKey = Arrays.asList(XContentMapValues.nodeStringValue(couchSettings.get("primary_key"), "").split(","));
             this.batchSize = XContentMapValues.nodeIntegerValue(couchSettings.get("batch_size"), 10000);
             this.hostName = XContentMapValues.nodeStringValue(couchSettings.get("hosts"), "localhost");
             this.dcName =  XContentMapValues.nodeStringValue(couchSettings.get("dcName"), "TESTDC");
@@ -137,8 +140,18 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                 Row row = (Row) ite.next();
                 //values = new HashMap<String, Map<String, String>>();
                 ColumnDefinitions columnDefinitions =  row.getColumnDefinitions();
-                String rowId = UUID.randomUUID().toString();
-                Map<String, String> rows = new HashMap<String, String>();
+                String primaryKeyValue = UUID.randomUUID().toString();
+                List<String> primaryKey = getPrimaryKey();
+                if(!primaryKey.isEmpty()) {
+                    primaryKeyValue = "";
+                    for (Iterator iterator = primaryKey.iterator(); iterator.hasNext();) {
+                        String key = (String) iterator.next();
+                        DataType type = columnDefinitions.getType(key);
+                        primaryKeyValue += CassandraFactory.getStringValue(type, row, key);
+                    }
+                    primaryKeyValue = Integer.toString(primaryKeyValue.hashCode());
+                }
+                Map<String, String> data = new HashMap<String, String>();
 
                 //logger.info("Column defination:{}", columnDefinitions);
                 for(int i = 0; i < columnDefinitions.size(); i++){
@@ -148,9 +161,9 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
                     columnValue = CassandraFactory.getStringValue(dataType, row, columnName);
 
-                    rows.put(columnName, columnValue);
+                    data.put(columnName, columnValue);
                 }
-                values.put(rowId, rows);
+                values.put(primaryKeyValue, data);
                 if(values.size() >= getBatchSize()){
                     // copy hash map
                     Map<String, Map<String, String>>  tmpValues = new HashMap<String, Map<String, String>>();
@@ -257,6 +270,14 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
     public void setColumnFamily(String columnFamily) {
         this.columnFamily = columnFamily;
+    }
+
+    public static List<String> getPrimaryKey() {
+        return primaryKey;
+    }
+
+    public void setPrimaryKey(List<String> primaryKey) {
+        this.primaryKey = primaryKey;
     }
 
     public static int getBatchSize() {
