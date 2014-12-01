@@ -46,6 +46,9 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
     private static String typeName;
     private static String indexName;
     private String cron;
+    
+    private String username;
+    private String password;
 
     private static CassandraFactory cassandraFactory;
 
@@ -66,6 +69,8 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             this.hostName = XContentMapValues.nodeStringValue(couchSettings.get("hosts"), "localhost");
             this.dcName =  XContentMapValues.nodeStringValue(couchSettings.get("dcName"), "TESTDC");
             this.cron = XContentMapValues.nodeStringValue(couchSettings.get("cron"), "0/30 * * * * ?"); // DEFAULT every 30 second
+            this.username = XContentMapValues.nodeStringValue(couchSettings.get("username"), "");
+            this.password = XContentMapValues.nodeStringValue(couchSettings.get("password"), "");
         }
         if ( settings!=null &&  settings.settings().containsKey("index")) {
             Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("index");
@@ -77,7 +82,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             this.typeName = "DEFAULT_TYPE_NAME";
         }
         // init factory
-        cassandraFactory = CassandraFactory.getInstance(getKeySpace(), getHostName(), getPort(), getDcName());
+        cassandraFactory = CassandraFactory.getInstance(getKeySpace(), getHostName(), getPort(), getDcName(), getUsername(), getPassword());
     }
 
     @Override
@@ -298,5 +303,13 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
     public String getCron() {
         return cron;
+    }
+    
+    public String getUsername() {
+        return username;
+    }
+    
+    public String getPassword() {
+        return password;
     }
 }
