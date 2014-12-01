@@ -32,7 +32,7 @@ public class CassandraFactory {
 
 
     private CassandraFactory() {    }
-    private CassandraFactory(String keySpaceName, String hostName, String port, String dcName){
+    private CassandraFactory(String keySpaceName, String hostName, String port, String dcName, String username, String password){
         LoadBalancingPolicy loadBalancingPolicy = new DCAwareRoundRobinPolicy(dcName,2);
         PoolingOptions poolingOptions = new PoolingOptions();
 
@@ -40,11 +40,14 @@ public class CassandraFactory {
         poolingOptions.setMaxConnectionsPerHost(HostDistance.LOCAL, 50);
 
         //cluster = Cluster.builder().addContactPoints(hostName).withCompression(ProtocolOptions.Compression.SNAPPY)
-        cluster = Cluster.builder().addContactPoints(hostName)
+        Cluster.Builder builder = Cluster.builder().addContactPoints(hostName)
                 .withPoolingOptions(poolingOptions)
                 .withReconnectionPolicy(new ConstantReconnectionPolicy(100L))
-                .withLoadBalancingPolicy(loadBalancingPolicy)
-                .build();
+                .withLoadBalancingPolicy(loadBalancingPolicy);
+        if(!username.isEmpty() && !password.isEmpty()) {
+            builder.withCredentials(username, password);
+        }
+        cluster = builder.build();
         Metadata metadata = cluster.getMetadata();
         LOGGER.info("Connected to cluster: {}", metadata.getClusterName());
         for ( Host host : metadata.getAllHosts() ) {
@@ -54,8 +57,8 @@ public class CassandraFactory {
         LOGGER.info("Connection established!");
     }
 
-    public static CassandraFactory getInstance(String keySpaceName, String hostName, String port, String dcName){
-        return new CassandraFactory(keySpaceName, hostName, port, dcName);
+    public static CassandraFactory getInstance(String keySpaceName, String hostName, String port, String dcName, String username, String password){
+        return new CassandraFactory(keySpaceName, hostName, port, dcName, username, password);
     }
 
     public Session getSession() {
