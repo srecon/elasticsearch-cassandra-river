@@ -18,6 +18,10 @@ import org.quartz.spi.ThreadExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.UnsupportedEncodingException;
+import java.math.BigInteger;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -63,9 +67,17 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("cassandra");
             this.clusterName = XContentMapValues.nodeStringValue(couchSettings.get("cluster_name"), "Test Cluster");
             this.keySpace = XContentMapValues.nodeStringValue(couchSettings.get("keyspace"), "default");
-            this.columnFamily = XContentMapValues.nodeStringValue(couchSettings.get("column_family"), "cities");
-            this.primaryKey = Arrays.asList(XContentMapValues.nodeStringValue(couchSettings.get("primary_key"), "").split(","));
-            this.batchSize = XContentMapValues.nodeIntegerValue(couchSettings.get("batch_size"), 10000);
+            columnFamily = XContentMapValues.nodeStringValue(couchSettings.get("column_family"), "cities");
+            String tmp = XContentMapValues.nodeStringValue(couchSettings.get("primary_key"), "");
+            if(!tmp.isEmpty() && tmp.contains(",")) {
+                primaryKey = Arrays.asList(tmp.split(","));
+            } else {
+                primaryKey = new ArrayList<String>();
+                if(!tmp.isEmpty()) {
+                    primaryKey.add(tmp);
+                }
+            }
+            batchSize = XContentMapValues.nodeIntegerValue(couchSettings.get("batch_size"), 10000);
             this.hostName = XContentMapValues.nodeStringValue(couchSettings.get("hosts"), "localhost");
             this.dcName =  XContentMapValues.nodeStringValue(couchSettings.get("dcName"), "TESTDC");
             this.cron = XContentMapValues.nodeStringValue(couchSettings.get("cron"), "0/30 * * * * ?"); // DEFAULT every 30 second
@@ -144,17 +156,31 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             while(ite.hasNext()){
                 Row row = (Row) ite.next();
                 //values = new HashMap<String, Map<String, String>>();
-                ColumnDefinitions columnDefinitions =  row.getColumnDefinitions();
+                ColumnDefinitions columnDefinitions = row.getColumnDefinitions();
                 String primaryKeyValue = UUID.randomUUID().toString();
                 List<String> primaryKey = getPrimaryKey();
                 if(!primaryKey.isEmpty()) {
+                    LOGGER.debug("generating primary key from " + primaryKey);
                     primaryKeyValue = "";
                     for (Iterator iterator = primaryKey.iterator(); iterator.hasNext();) {
                         String key = (String) iterator.next();
                         DataType type = columnDefinitions.getType(key);
                         primaryKeyValue += CassandraFactory.getStringValue(type, row, key);
                     }
-                    primaryKeyValue = Integer.toString(primaryKeyValue.hashCode());
+                    try {
+                        MessageDigest crypt = MessageDigest.getInstance("SHA-1");
+                        crypt.reset();
+                        crypt.update(primaryKeyValue.getBytes("UTF-8"));
+                        primaryKeyValue = new BigInteger(1, crypt.digest()).toString(16);
+                    } catch(NoSuchAlgorithmException e) {
+                        primaryKeyValue = UUID.randomUUID().toString();
+                        LOGGER.warn("generating primary key from uuid " + primaryKeyValue + " as SHA-1 algorithm not found");
+                    } catch(UnsupportedEncodingException e) {
+                        primaryKeyValue = UUID.randomUUID().toString();
+                        LOGGER.warn("generating primary key from uuid " + primaryKeyValue + " as UTF-8 is an unsupported encoding");
+                    }
+                } else {
+                    LOGGER.debug("generating primary key from uuid " + primaryKeyValue);
                 }
                 Map<String, String> data = new HashMap<String, String>();
 
@@ -282,7 +308,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
     }
 
     public void setPrimaryKey(List<String> primaryKey) {
-        this.primaryKey = primaryKey;
+        primaryKey = primaryKey;
     }
 
     public static int getBatchSize() {
