@@ -23,16 +23,12 @@ import java.util.*;
  */
 public class CassandraFactory {
     private static Cluster cluster;
-    private static Session session;
+    private Map<String, Session> sessions = new HashMap<String, Session>();
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CassandraFactory.class);
-    
-    private static final String DATA_TYPE_TIMESTAMP="timestamp";
-    private static final String DATA_TYPE_BOOLEAN="boolean";
-
 
     private CassandraFactory() {    }
-    private CassandraFactory(String keySpaceName, String hostName, String port, String dcName, String username, String password){
+    private CassandraFactory(String hostName, String port, String dcName, String username, String password){
         LoadBalancingPolicy loadBalancingPolicy = new DCAwareRoundRobinPolicy(dcName,2);
         PoolingOptions poolingOptions = new PoolingOptions();
 
@@ -51,19 +47,26 @@ public class CassandraFactory {
         Metadata metadata = cluster.getMetadata();
         LOGGER.info("Connected to cluster: {}", metadata.getClusterName());
         for ( Host host : metadata.getAllHosts() ) {
-            LOGGER.info("Datacenter: {}; Host: {}; Rack: {}", new String[]{host.getDatacenter(), host.getAddress().getHostAddress(), host.getRack()});
+            LOGGER.info("Datacenter: {}; Host: {}; Rack: {}", new String[]{ host.getDatacenter(), host.getAddress().getHostAddress(), host.getRack() });
         }
-        session = cluster.connect(keySpaceName);
-        LOGGER.info("Connection established!");
     }
 
-    public static CassandraFactory getInstance(String keySpaceName, String hostName, String port, String dcName, String username, String password){
-        return new CassandraFactory(keySpaceName, hostName, port, dcName, username, password);
+    public static CassandraFactory getInstance(String hostName, String port, String dcName, String username, String password){
+        return new CassandraFactory(hostName, port, dcName, username, password);
     }
 
-    public Session getSession() {
+    public Session getSession(String keySpaceName) {
+        Session session;
+        if(this.sessions.containsKey(keySpaceName)) {
+            session = this.sessions.get(keySpaceName);
+        } else {
+            session = cluster.connect(keySpaceName);
+            LOGGER.info(String.format("Connection established to %s!", keySpaceName));
+            this.sessions.put(keySpaceName, session);
+        }
         return session;
     }
+
     public void shutdown(){
         if(cluster != null && !cluster.isClosed()){
             cluster.close();
@@ -78,7 +81,7 @@ public class CassandraFactory {
         if (dataType == null){
             return value;
         }
-
+        
         switch(dataType.getName()) {
             case BIGINT:
             case COUNTER: {
@@ -160,11 +163,5 @@ public class CassandraFactory {
             }
         }
         return value;
-    }
-
-    private String[] getHostArray(String propertiesVal){
-        Iterable<String> values = Splitter.on(",").trimResults().split(propertiesVal);
-
-        return Iterables.toArray(values, String.class);
     }
 }

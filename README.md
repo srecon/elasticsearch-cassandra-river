@@ -1,6 +1,6 @@
 elasticsearch-cassandra-river
 =============================
-Elasticsearch river for Cassandra 2.* version with CQL support, based on data pull method from Cassandra cluster. Project Cloned and modified from the origin https://github.com/eBay/cassandra-river. 
+Elasticsearch river for Cassandra 2.* version with CQL support, based on data pull method from Cassandra cluster. Project Cloned and modified from the origin https://github.com/eBay/cassandra-river.
 
 1. Based on Datastax Java driver
 2. CQL support
@@ -11,9 +11,9 @@ build : mvn clean install
 
 install:
 
-- copy target/releases/cassandra-river-1.0-SNAPSHOT.zip into $ELASTICSEARCH_HOME/plugin/cassandra-river
+- copy target/releases/cassandra-river-1.0.1-SNAPSHOT.zip into $ELASTICSEARCH_HOME/plugin/cassandra-river
   or
-- ./plugin --url file:/river/cassandra-river-1.0-SNAPSHOT.zip --install cassandra-river
+- ./plugin --url file:/river/cassandra-river-1.0.1-SNAPSHOT.zip --install cassandra-river
 
 remove:
  ./plugin --remove cassandra-river
@@ -22,19 +22,45 @@ remove:
     curl -XPUT 'http://HOST:PORT/_river/cassandra-river/_meta' -d '{
         "type" : "cassandra",
         "cassandra" : {
-            "cluster_name" : "Test Cluster",
-            "keyspace" : "nortpole",
-            "column_family" : "users",
-            "batch_size" : 20000,
-            "hosts" : "localhost",
-            "dcName" : "DC",
-            "cron"  : "0/60 * * * * ?"
-        },
-        "index" : {
-            "index" : "prodinfo",
-            "type" : "product"
+            "connection" :
+            {
+                "hosts" : "hostname",
+                "data_centre" : "dc",
+                "username" : "optional_username",
+                "password" : "optional_password"
+            },
+            "sync" :
+            {
+                "batch_size" : 20000,
+                "schedule" : "0 0/15 * * * ?"
+            },
+            "keyspaces" :
+            [
+                {
+                    "name" : "keyspace_name",
+                    "column_families" :
+                    [
+                        {
+                            "name" : "column_family_name",
+                            "primary_key" : "column_family_primary_key",
+                            "index" :
+                            {
+                                "name" : "keyspace_name_column_family_name_index",
+                                "type" : "keyspace_name_column_family_name"
+                            }
+                        }
+                    ]
+                }
+            ]
         }
     }'
+
+Notes on the above:
+
+ * `hosts` can be a single ip address or dns name or comma separated list (with no spaces).
+ * `keyspaces` is a list of dictionaries describing the keyspaces and their column familes.
+ * `column_families` is a list of dictionaries describing the column family.
+
 ##Search
 Install plugin head
 $ES_HOME\bin\plugin -install mobz/elasticsearch-head
@@ -45,6 +71,4 @@ http://HOST:PORT/_plugin/head/
 
 ##Improvments
 1. Add unit Tests
-2. Update records
-3. Add newly added rows in ES by date
-4. Add multi tables support  
+2. Add newly added rows in ES by date

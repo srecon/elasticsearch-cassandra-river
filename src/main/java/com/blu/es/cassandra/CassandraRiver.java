@@ -6,6 +6,7 @@ import com.datastax.driver.core.*;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.client.*;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.mvel2.optimizers.impl.refl.nodes.ThisValueAccessor;
 import org.elasticsearch.common.util.concurrent.ThreadFactoryBuilder;
 import org.elasticsearch.common.xcontent.support.XContentMapValues;
 import org.elasticsearch.river.AbstractRiverComponent;
@@ -33,137 +34,178 @@ import java.util.concurrent.ThreadFactory;
  * Time: 14:28
  */
 public class CassandraRiver extends AbstractRiverComponent implements River {
-    private static final String SETTINGS_KEY_CASSANDRA="cassandra";
+    private static final String SETTINGS_KEY_CASSANDRA = "cassandra";
+    private static final String SETTINGS_KEY_CONNECTION = "connection";
+    private static final String SETTINGS_KEY_KEYSPACES = "keyspaces";
+    private static final String SETTINGS_KEY_SYNC = "sync";
+
+    private static final String JOB_DATA_KEY_KEYSPACE = "KeySpace";
+    private static final String JOB_DATA_KEY_BATCH_SIZE = "BatchSize";
+    private static final String JOB_DATA_KEY_COLUMN_FAMILY = "ColumnFamily";
+    private static final String JOB_DATA_KEY_PRIMARY_KEY = "PrimaryKey";
+    private static final String JOB_DATA_KEY_INDEX_NAME = "Index";
+    private static final String JOB_DATA_KEY_INDEX_TYPE = "Type";
+
     private static final Logger LOGGER = LoggerFactory.getLogger(CassandraRiver.class);
 
+    private List<Map<String,Object>> keyspaces = new ArrayList<Map<String,Object>>();
+    private int batchSize;
+    private String schedule;
 
-    private String hostName;
-    private String dcName;
-    private String port;
-    private String clusterName;
-    private String keySpace;
-    private static String columnFamily;
-    private static List<String> primaryKey;
-    private static int batchSize;
     private static Client client;
-
-    private static String typeName;
-    private static String indexName;
-    private String cron;
-    
-    private String username;
-    private String password;
-
     private static CassandraFactory cassandraFactory;
-
 
     @Inject
     @SuppressWarnings("unchecked")
-    protected CassandraRiver(RiverName riverName, RiverSettings settings, Client client) {
+    protected CassandraRiver(RiverName riverName, RiverSettings settings, Client nodeClient) {
         super(riverName, settings);
-        this.client = client;
+        client = nodeClient;
         // read settings
         if(settings != null && settings.settings().containsKey(SETTINGS_KEY_CASSANDRA)){
-            Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("cassandra");
-            this.clusterName = XContentMapValues.nodeStringValue(couchSettings.get("cluster_name"), "Test Cluster");
-            this.keySpace = XContentMapValues.nodeStringValue(couchSettings.get("keyspace"), "default");
-            columnFamily = XContentMapValues.nodeStringValue(couchSettings.get("column_family"), "cities");
-            String tmp = XContentMapValues.nodeStringValue(couchSettings.get("primary_key"), "");
-            if(!tmp.isEmpty() && tmp.contains(",")) {
-                primaryKey = Arrays.asList(tmp.split(","));
-            } else {
-                primaryKey = new ArrayList<String>();
-                if(!tmp.isEmpty()) {
-                    primaryKey.add(tmp);
-                }
+            Map<String, Object> cassandraSettings = (Map<String, Object>) settings.settings().get("cassandra");
+            if(cassandraSettings != null && cassandraSettings.containsKey(SETTINGS_KEY_CONNECTION))
+            {
+                LOGGER.debug("Parsing connection data");
+                Map<String, Object> connectionSettings = (Map<String, Object>) cassandraSettings.get(SETTINGS_KEY_CONNECTION);
+                String hosts = XContentMapValues.nodeStringValue(connectionSettings.get("hosts"), "localhost");
+                String port =  XContentMapValues.nodeStringValue(connectionSettings.get("port"), "9160");
+                String dataCentre =  XContentMapValues.nodeStringValue(connectionSettings.get("data_centre"), "UNKNOWN_DC");
+                String username = XContentMapValues.nodeStringValue(connectionSettings.get("username"), "");
+                String password = XContentMapValues.nodeStringValue(connectionSettings.get("password"), "");
+                // init factory
+                cassandraFactory = CassandraFactory.getInstance(hosts, port, dataCentre, username, password);
             }
-            batchSize = XContentMapValues.nodeIntegerValue(couchSettings.get("batch_size"), 10000);
-            this.hostName = XContentMapValues.nodeStringValue(couchSettings.get("hosts"), "localhost");
-            this.dcName =  XContentMapValues.nodeStringValue(couchSettings.get("dcName"), "TESTDC");
-            this.cron = XContentMapValues.nodeStringValue(couchSettings.get("cron"), "0/30 * * * * ?"); // DEFAULT every 30 second
-            this.username = XContentMapValues.nodeStringValue(couchSettings.get("username"), "");
-            this.password = XContentMapValues.nodeStringValue(couchSettings.get("password"), "");
-        }
-        if ( settings!=null &&  settings.settings().containsKey("index")) {
-            Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("index");
-            this.indexName = XContentMapValues.nodeStringValue(couchSettings.get("index"), "DEFAULT_INDEX_NAME");
-            this.typeName = XContentMapValues.nodeStringValue(couchSettings.get("type"), "DEFAULT_TYPE_NAME");
+            if(cassandraSettings != null && cassandraSettings.containsKey(SETTINGS_KEY_KEYSPACES))
+            {
+                LOGGER.debug("Parsing keyspace data");
+                this.keyspaces = (List<Map<String, Object>>) cassandraSettings.get(SETTINGS_KEY_KEYSPACES);
 
-        } else {
-            this.indexName = "DEFAULT_INDEX_NAME";
-            this.typeName = "DEFAULT_TYPE_NAME";
+            }
+//            this.keySpace = XContentMapValues.nodeStringValue(cassandraSettings.get("keyspace"), "default");
+//            this.columnFamily = XContentMapValues.nodeStringValue(cassandraSettings.get("column_family"), "unknown");
+            if(cassandraSettings != null && cassandraSettings.containsKey(SETTINGS_KEY_SYNC))
+            {
+                LOGGER.debug("Parsing sync data");
+                Map<String, Object> syncSettings = (Map<String, Object>) cassandraSettings.get(SETTINGS_KEY_CONNECTION);
+                this.batchSize = XContentMapValues.nodeIntegerValue(syncSettings.get("batch_size"), 10000);
+                this.schedule = XContentMapValues.nodeStringValue(syncSettings.get("cron"), "0/60 * * * * ?"); // DEFAULT every 60 second
+            }
         }
-        // init factory
-        cassandraFactory = CassandraFactory.getInstance(getKeySpace(), getHostName(), getPort(), getDcName(), getUsername(), getPassword());
+//        if ( settings!=null &&  settings.settings().containsKey(SETTINGS_KEY_INDEX)) {
+//            Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("index");
+//            this.indexName = XContentMapValues.nodeStringValue(couchSettings.get("index"), "DEFAULT_INDEX_NAME");
+//            this.typeName = XContentMapValues.nodeStringValue(couchSettings.get("type"), "DEFAULT_TYPE_NAME");
+//
+//        } else {
+//            this.indexName = "DEFAULT_INDEX_NAME";
+//            this.typeName = "DEFAULT_TYPE_NAME";
+//        }
     }
 
-    @Override
     public void start() {
-        LOGGER.info("Cassandra River Start!!" + "batch size {}", getBatchSize());
-
-        JobDetail jobDetail = JobBuilder.newJob(RiverJOb.class).withIdentity("River Job","river").build();
-        //trigger
-        Trigger trigger = TriggerBuilder.newTrigger()
-                .withIdentity("RiverTrigger", "river")
-                .startNow()
-                .withSchedule(CronScheduleBuilder.cronSchedule(getCron()))
-                .build();
-        // schedule
-        Scheduler scheduler;
+        LOGGER.info("Starting Cassandra River");
         try {
-            scheduler = new StdSchedulerFactory().getScheduler();
+            Scheduler scheduler = new StdSchedulerFactory().getScheduler();
             scheduler.start();
-            scheduler.scheduleJob(jobDetail, trigger);
-
+            for (Map<String, Object> keyspace : this.keyspaces) {
+                String keyspaceName = (String) keyspace.get("name");
+                LOGGER.debug(String.format("processing %s keyspace", keyspaceName));
+                // Job details including data
+                JobDataMap jobData = new JobDataMap();
+                jobData.put(JOB_DATA_KEY_KEYSPACE, keyspaceName);
+                jobData.put(JOB_DATA_KEY_BATCH_SIZE, this.batchSize);
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> columnFamilies = (List<Map<String, Object>>) keyspace.get("column_families");
+                for (Map<String, Object> columnFamily : columnFamilies) {
+                    String columnFamilyName = (String) columnFamily.get("name");
+                    LOGGER.debug(String.format("processing %s column family", columnFamilyName));
+                    jobData.put(JOB_DATA_KEY_COLUMN_FAMILY, columnFamilyName);
+                    List<String> primaryKey;
+                    String tmp = XContentMapValues.nodeStringValue(columnFamily.get("primary_key"), "");
+                    if(!tmp.isEmpty() && tmp.contains(",")) {
+                        primaryKey = Arrays.asList(tmp.split(","));
+                    } else {
+                        primaryKey = new ArrayList<String>();
+                        if(!tmp.isEmpty()) {
+                            primaryKey.add(tmp);
+                        }
+                    }
+                    jobData.put(JOB_DATA_KEY_PRIMARY_KEY, primaryKey);
+                    @SuppressWarnings("unchecked")
+                    Map<String,String> index = (Map<String, String>) columnFamily.get("index");
+                    jobData.put(JOB_DATA_KEY_INDEX_NAME, index.get("name"));
+                    jobData.put(JOB_DATA_KEY_INDEX_TYPE, index.get("type"));
+                    String jobId = String.format("River %s %s Job", keyspaceName, columnFamilyName);
+                    JobDetail jobDetail = JobBuilder.newJob(RiverJob.class)
+                                                    .withIdentity(jobId,"river")
+                                                    .setJobData(jobData)
+                                                    .build();
+                    //trigger
+                    String triggerId = String.format("River %s %s Trigger", keyspaceName, columnFamilyName);
+                    Trigger trigger = TriggerBuilder.newTrigger()
+                            .withIdentity(triggerId, "river")
+                            .startNow()
+                            .withSchedule(CronScheduleBuilder.cronSchedule(this.schedule))
+                            .build();
+                    // schedule
+                    scheduler.scheduleJob(jobDetail, trigger);
+                }
+            }
         } catch (SchedulerException e) {
             LOGGER.info("Scheduler Exception {}", e);
         }
-
+        LOGGER.info("Cassandra River Started");
     }
 
-    @Override
     public void close() {
-        LOGGER.info("Cassandra River Close!!");
-        client.admin().indices().prepareDeleteMapping("_river").setType("cassandra-river").execute();
+        LOGGER.info("Closing Cassandra River");
+        getClient().admin().indices().prepareDeleteMapping("_river").setType("cassandra-river").execute();
         cassandraFactory.shutdown();
+        LOGGER.info("Cassandra River Closed");
     }
 
     // Quartz Job
     @DisallowConcurrentExecution
-    public static class RiverJOb implements Job{
-        public RiverJOb() {     }
+    public static class RiverJob implements Job{
+        public RiverJob() {     }
 
-        @Override
-        public void execute(JobExecutionContext jobExecutionContext) throws JobExecutionException {
-            LOGGER.info("Quartz Job");
+        public void execute(JobExecutionContext context) throws JobExecutionException {
+            LOGGER.info(String.format("Processing %s Quartz Job", context.getFireInstanceId()));
+            // Get input data
+            JobDataMap jobData = context.getJobDetail().getJobDataMap();
+            int batchSize = jobData.getInt(JOB_DATA_KEY_BATCH_SIZE);
+            String keyspace = jobData.getString(JOB_DATA_KEY_KEYSPACE);
+            String columnFamily = jobData.getString(JOB_DATA_KEY_COLUMN_FAMILY);
+            @SuppressWarnings("unchecked")
+            List<String> primaryKey = (List<String>) jobData.get(JOB_DATA_KEY_PRIMARY_KEY);
+            String typeName = jobData.getString(JOB_DATA_KEY_INDEX_TYPE);
+            String indexName = jobData.getString(JOB_DATA_KEY_INDEX_NAME);
+
             // executor to index
             ThreadFactory daemonThreadFactory = new ThreadFactoryBuilder().setNameFormat("Queue-Indexer-thread-%d").setDaemon(false).build();
             ExecutorService threadExecutor = Executors.newFixedThreadPool(20, daemonThreadFactory);
 
-            Session session =  cassandraFactory.getSession();
+            Session session =  cassandraFactory.getSession(keyspace);
 
-            String SQL = "select * from " + getColumnFamily() +" ALLOW FILTERING;";
+            String SQL = "select * from " + columnFamily +" ALLOW FILTERING;";
             PreparedStatement statement = session.prepare(SQL);
 
             BoundStatement bndStm = new BoundStatement(statement);
             bndStm.setFetchSize(batchSize);
 
-            ResultSet result = session.execute(bndStm.bind());
-            Iterator ite = result.iterator();
+            ResultSet resultSet = session.execute(bndStm.bind());
+            Iterator<Row> result = resultSet.iterator();
 
-            //CassandraCFData cfData = new CassandraCFData();
-            Map<String, Map<String, String>>  values = new HashMap<String, Map<String, String>>();
-            while(ite.hasNext()){
-                Row row = (Row) ite.next();
-                //values = new HashMap<String, Map<String, String>>();
+            Map<String, Map<String, String>> values = new HashMap<String, Map<String, String>>();
+            while(result.hasNext()){
+                Row row = result.next();
                 ColumnDefinitions columnDefinitions = row.getColumnDefinitions();
                 String primaryKeyValue = UUID.randomUUID().toString();
-                List<String> primaryKey = getPrimaryKey();
                 if(!primaryKey.isEmpty()) {
                     LOGGER.debug("generating primary key from " + primaryKey);
-                    primaryKeyValue = "";
-                    for (Iterator iterator = primaryKey.iterator(); iterator.hasNext();) {
-                        String key = (String) iterator.next();
+                    primaryKeyValue = String.format("%s%s", keyspace, columnFamily);
+                    for (Iterator<String> iterator = primaryKey.iterator(); iterator.hasNext();) {
+                        String key = iterator.next();
                         DataType type = columnDefinitions.getType(key);
                         primaryKeyValue += CassandraFactory.getStringValue(type, row, key);
                     }
@@ -184,7 +226,6 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                 }
                 Map<String, String> data = new HashMap<String, String>();
 
-                //logger.info("Column defination:{}", columnDefinitions);
                 for(int i = 0; i < columnDefinitions.size(); i++){
                     String columnName = columnDefinitions.getName(i);
                     String columnValue="";
@@ -195,16 +236,16 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                     data.put(columnName, columnValue);
                 }
                 values.put(primaryKeyValue, data);
-                if(values.size() >= getBatchSize()){
+                if(values.size() >= batchSize){
                     // copy hash map
                     Map<String, Map<String, String>>  tmpValues = new HashMap<String, Map<String, String>>();
                     tmpValues.putAll(values);
-                    threadExecutor.execute(new Indexer(getBatchSize(),tmpValues, getTypeName(), getIndexName()));
+                    threadExecutor.execute(new Indexer(batchSize, tmpValues, typeName, indexName));
                     values = new HashMap<String, Map<String, String>>();
                 }
             }
-            if(values.size() < getBatchSize()){
-                threadExecutor.execute(new Indexer(getBatchSize(),values, getTypeName(), getIndexName()));
+            if(values.size() < batchSize){
+                threadExecutor.execute(new Indexer(batchSize, values, typeName, indexName));
             }
 
         }
@@ -223,10 +264,9 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             this.indexName = indexName;
         }
 
-        @Override
         public void run() {
             LOGGER.info("Starting thread with Data {}, batch size {}", this.keys.size(), this.batchSize);
-            BulkRequestBuilder bulk = client.prepareBulk();
+            BulkRequestBuilder bulk = getClient().prepareBulk();
             for(String key : this.keys.keySet()){
                 try{
                     bulk.add(Requests.indexRequest(this.indexName).type(this.typeName)
@@ -238,11 +278,11 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             }
             saveToEs(bulk);
         }
+
         private boolean saveToEs(BulkRequestBuilder bulkRequestBuilder){
             LOGGER.info("Inserting {} keys in ES", bulkRequestBuilder.numberOfActions());
             try{
                 bulkRequestBuilder.execute().addListener(new Runnable() {
-                    @Override
                     public void run() {
                         LOGGER.info("Processing Done!!");
                     }
@@ -255,87 +295,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
     }
 
-    public String getHostName() {
-        return hostName;
-    }
-
-    public void setHostName(String hostName) {
-        this.hostName = hostName;
-    }
-
-    public String getDcName() {
-        return dcName;
-    }
-
-    public void setDcName(String dcName) {
-        this.dcName = dcName;
-    }
-
-    public String getPort() {
-        return port;
-    }
-
-    public void setPort(String port) {
-        this.port = port;
-    }
-
-    public String getClusterName() {
-        return clusterName;
-    }
-
-    public void setClusterName(String clusterName) {
-        this.clusterName = clusterName;
-    }
-
-    public String getKeySpace() {
-        return keySpace;
-    }
-
-    public void setKeySpace(String keySpace) {
-        this.keySpace = keySpace;
-    }
-
-    public static String getColumnFamily() {
-        return columnFamily;
-    }
-
-    public void setColumnFamily(String columnFamily) {
-        this.columnFamily = columnFamily;
-    }
-
-    public static List<String> getPrimaryKey() {
-        return primaryKey;
-    }
-
-    public void setPrimaryKey(List<String> primaryKey) {
-        primaryKey = primaryKey;
-    }
-
-    public static int getBatchSize() {
-        return batchSize;
-    }
-
-    public void setBatchSize(int batchSize) {
-        this.batchSize = batchSize;
-    }
-
-    public static String getTypeName() {
-        return typeName;
-    }
-
-    public static String getIndexName() {
-        return indexName;
-    }
-
-    public String getCron() {
-        return cron;
-    }
-    
-    public String getUsername() {
-        return username;
-    }
-    
-    public String getPassword() {
-        return password;
+    public static Client getClient() {
+        return client;
     }
 }
