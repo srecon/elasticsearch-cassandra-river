@@ -1,5 +1,6 @@
 # Eclipse generated files and folders
 .classpath
 .project
+.settings
 target
 /bin
