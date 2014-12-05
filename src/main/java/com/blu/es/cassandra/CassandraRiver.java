@@ -1,13 +1,19 @@
 package com.blu.es.cassandra;
 
-import com.blu.es.plugin.river.CassandraRiverPlugin;
+import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
+
 import com.datastax.driver.core.*;
 
+import org.elasticsearch.action.ListenableActionFuture;
+import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
+import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsRequestBuilder;
+import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsResponse;
+import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequestBuilder;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.client.*;
 import org.elasticsearch.common.inject.Inject;
-import org.elasticsearch.common.mvel2.optimizers.impl.refl.nodes.ThisValueAccessor;
 import org.elasticsearch.common.util.concurrent.ThreadFactoryBuilder;
+import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.support.XContentMapValues;
 import org.elasticsearch.river.AbstractRiverComponent;
 import org.elasticsearch.river.River;
@@ -15,10 +21,10 @@ import org.elasticsearch.river.RiverName;
 import org.elasticsearch.river.RiverSettings;
 import org.quartz.*;
 import org.quartz.impl.StdSchedulerFactory;
-import org.quartz.spi.ThreadExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
 import java.security.MessageDigest;
@@ -79,10 +85,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             {
                 LOGGER.debug("Parsing keyspace data");
                 this.keyspaces = (List<Map<String, Object>>) cassandraSettings.get(SETTINGS_KEY_KEYSPACES);
-
             }
-//            this.keySpace = XContentMapValues.nodeStringValue(cassandraSettings.get("keyspace"), "default");
-//            this.columnFamily = XContentMapValues.nodeStringValue(cassandraSettings.get("column_family"), "unknown");
             if(cassandraSettings != null && cassandraSettings.containsKey(SETTINGS_KEY_SYNC))
             {
                 LOGGER.debug("Parsing sync data");
@@ -91,15 +94,6 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                 this.schedule = XContentMapValues.nodeStringValue(syncSettings.get("cron"), "0/60 * * * * ?"); // DEFAULT every 60 second
             }
         }
-//        if ( settings!=null &&  settings.settings().containsKey(SETTINGS_KEY_INDEX)) {
-//            Map<String, Object> couchSettings = (Map<String, Object>) settings.settings().get("index");
-//            this.indexName = XContentMapValues.nodeStringValue(couchSettings.get("index"), "DEFAULT_INDEX_NAME");
-//            this.typeName = XContentMapValues.nodeStringValue(couchSettings.get("type"), "DEFAULT_TYPE_NAME");
-//
-//        } else {
-//            this.indexName = "DEFAULT_INDEX_NAME";
-//            this.typeName = "DEFAULT_TYPE_NAME";
-//        }
     }
 
     public void start() {
@@ -109,7 +103,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             scheduler.start();
             for (Map<String, Object> keyspace : this.keyspaces) {
                 String keyspaceName = (String) keyspace.get("name");
-                LOGGER.debug(String.format("processing %s keyspace", keyspaceName));
+                LOGGER.info(String.format("Defining %s keyspace", keyspaceName));
                 // Job details including data
                 JobDataMap jobData = new JobDataMap();
                 jobData.put(JOB_DATA_KEY_KEYSPACE, keyspaceName);
@@ -118,7 +112,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                 List<Map<String, Object>> columnFamilies = (List<Map<String, Object>>) keyspace.get("column_families");
                 for (Map<String, Object> columnFamily : columnFamilies) {
                     String columnFamilyName = (String) columnFamily.get("name");
-                    LOGGER.debug(String.format("processing %s column family", columnFamilyName));
+                    LOGGER.info(String.format("Creating %s column family job", columnFamilyName));
                     jobData.put(JOB_DATA_KEY_COLUMN_FAMILY, columnFamilyName);
                     List<String> primaryKey;
                     String tmp = XContentMapValues.nodeStringValue(columnFamily.get("primary_key"), "");
@@ -133,15 +127,60 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                     jobData.put(JOB_DATA_KEY_PRIMARY_KEY, primaryKey);
                     @SuppressWarnings("unchecked")
                     Map<String,String> index = (Map<String, String>) columnFamily.get("index");
-                    jobData.put(JOB_DATA_KEY_INDEX_NAME, index.get("name"));
-                    jobData.put(JOB_DATA_KEY_INDEX_TYPE, index.get("type"));
-                    String jobId = String.format("River %s %s Job", keyspaceName, columnFamilyName);
+                    String indexName = XContentMapValues.nodeStringValue(index.get("name"), "DEFAULT_INDEX_NAME");
+                    String indexType = XContentMapValues.nodeStringValue(index.get("type"), "DEFAULT_TYPE_NAME");
+                    jobData.put(JOB_DATA_KEY_INDEX_NAME, indexName);
+                    jobData.put(JOB_DATA_KEY_INDEX_TYPE, indexType);
+                    if(columnFamily.containsKey("columns")) {
+                        LOGGER.info("creating {}", indexType);
+                        // Create Index and set settings and mappings
+                        @SuppressWarnings("unchecked")
+                        List<Map<String, String>> columns = (List<Map<String, String>>) columnFamily.get("columns");
+                        IndicesExistsResponse res = client.admin().indices().prepareExists(indexName).execute().actionGet();
+                        //IndicesExistsResponse res = client.admin().indices().prepareExists(indexName).execute().actionGet();
+                        // MAPPING GOES HERE
+                        for (Map<String, String> column : columns) {
+                            String columnName = column.get("name");
+                            LOGGER.info("adding {}", columnName);
+                            try {
+                                XContentBuilder mappingBuilder = jsonBuilder()
+                                        .startObject()
+                                            .startObject(indexType)
+                                                .startObject("properties")
+                                                    .startObject(columnName)
+                                                        .field("type", column.get("type"));
+                                if(column.containsKey("format")) {
+                                    mappingBuilder.field("format", column.get("format"));
+                                }
+                                mappingBuilder
+                                                    .endObject()
+                                                .endObject()
+                                            .endObject()
+                                        .endObject();
+                                LOGGER.debug(mappingBuilder.string());
+                                if (res.isExists()) {
+                                    PutMappingRequestBuilder putMappingRequestBuilder = client.admin().indices().preparePutMapping(indexName);
+                                    putMappingRequestBuilder.setType(indexType).setSource(mappingBuilder);
+                                    putMappingRequestBuilder.execute().actionGet();
+                                } else {
+                                    CreateIndexRequestBuilder createIndexRequestBuilder = client.admin().indices().prepareCreate(indexName);
+                                    createIndexRequestBuilder.addMapping(indexType, mappingBuilder);
+                                    createIndexRequestBuilder.execute().actionGet();
+                                    res = client.admin().indices().prepareExists(indexName).execute().actionGet();
+                                }
+                            } catch (IOException e) {
+                                LOGGER.warn("XContentBuilder IO exception {}", e);
+                            }
+                        }
+                        // MAPPING DONE
+                    }
+                    String jobId = String.format("River%s%sJob", keyspaceName, columnFamilyName);
                     JobDetail jobDetail = JobBuilder.newJob(RiverJob.class)
                                                     .withIdentity(jobId,"river")
                                                     .setJobData(jobData)
                                                     .build();
                     //trigger
-                    String triggerId = String.format("River %s %s Trigger", keyspaceName, columnFamilyName);
+                    String triggerId = String.format("River%s%sTrigger", keyspaceName, columnFamilyName);
                     Trigger trigger = TriggerBuilder.newTrigger()
                             .withIdentity(triggerId, "river")
                             .startNow()
@@ -152,7 +191,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                 }
             }
         } catch (SchedulerException e) {
-            LOGGER.info("Scheduler Exception {}", e);
+            LOGGER.warn("Scheduler Exception {}", e);
         }
         LOGGER.info("Cassandra River Started");
     }
@@ -170,7 +209,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
         public RiverJob() {     }
 
         public void execute(JobExecutionContext context) throws JobExecutionException {
-            LOGGER.info(String.format("Processing %s Quartz Job", context.getFireInstanceId()));
+            LOGGER.info(String.format("Processing %s Quartz Job", context.getJobDetail().getKey().getName()));
             // Get input data
             JobDataMap jobData = context.getJobDetail().getJobDataMap();
             int batchSize = jobData.getInt(JOB_DATA_KEY_BATCH_SIZE);
@@ -244,6 +283,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                     values = new HashMap<String, Map<String, String>>();
                 }
             }
+
             if(values.size() < batchSize){
                 threadExecutor.execute(new Indexer(batchSize, values, typeName, indexName));
             }
@@ -265,7 +305,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
         }
 
         public void run() {
-            LOGGER.info("Starting thread with Data {}, batch size {}", this.keys.size(), this.batchSize);
+            LOGGER.info("Starting thread with Data {}, batch size {} for {}", this.keys.size(), this.batchSize, this.indexName);
             BulkRequestBuilder bulk = getClient().prepareBulk();
             for(String key : this.keys.keySet()){
                 try{
@@ -273,22 +313,22 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                             .id(key).source(this.keys.get(key)));
 
                 } catch(Exception e){
-                    LOGGER.error("Exception in run {}", e);
+                    LOGGER.error("{} run had an Exception {}", this.indexName, e);
                 }
             }
             saveToEs(bulk);
         }
 
         private boolean saveToEs(BulkRequestBuilder bulkRequestBuilder){
-            LOGGER.info("Inserting {} keys in ES", bulkRequestBuilder.numberOfActions());
+            LOGGER.debug("Inserting {} keys in ES[{}]", bulkRequestBuilder.numberOfActions(), this.indexName);
             try{
                 bulkRequestBuilder.execute().addListener(new Runnable() {
                     public void run() {
-                        LOGGER.info("Processing Done!!");
+                        LOGGER.debug("Processing Done!!");
                     }
                 });
             } catch(Exception e){
-                LOGGER.info("Exception in persistance {}", e);
+                LOGGER.warn("{} had an Exception in persisting: {}", this.indexName, e);
             }
                 return false;
             }
