@@ -152,6 +152,17 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                                 if(column.containsKey("format")) {
                                     mappingBuilder.field("format", column.get("format"));
                                 }
+                                if(column.containsKey("raw") && column.containsKey("raw")) {
+                                    mappingBuilder
+                                                        .field("index", "analyzed")
+//                                                        .field("copy_to", String.format("%s.raw", columnName))
+                                                        .startObject("fields")
+                                                            .startObject("raw")
+                                                                .field("type", column.get("type"))
+                                                                .field("index", "not_analyzed")
+                                                            .endObject()
+                                                        .endObject();
+                                }
                                 mappingBuilder
                                                     .endObject()
                                                 .endObject()
