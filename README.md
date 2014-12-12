@@ -11,9 +11,9 @@ build : mvn clean install
 
 install:
 
-- copy target/releases/cassandra-river-1.0.1-SNAPSHOT.zip into $ELASTICSEARCH_HOME/plugin/cassandra-river
+- copy target/releases/cassandra-river-1.0.3-SNAPSHOT.zip into $ELASTICSEARCH_HOME/plugin/cassandra-river
   or
-- ./plugin --url file:/river/cassandra-river-1.0.1-SNAPSHOT.zip --install cassandra-river
+- ./plugin --url file:/river/cassandra-river-1.0.3-SNAPSHOT.zip --install cassandra-river
 
 remove:
  ./plugin --remove cassandra-river
@@ -47,7 +47,15 @@ remove:
                             {
                                 "name" : "keyspace_name_column_family_name_index",
                                 "type" : "keyspace_name_column_family_name"
-                            }
+                            },
+                            "columns" :
+                            [
+                                {
+                                    "name" : "user_id",
+                                    "type" : "string"
+                                    "raw": "true"
+                                }
+                            ]
                         }
                     ]
                 }
@@ -60,6 +68,11 @@ Notes on the above:
  * `hosts` can be a single ip address or dns name or comma separated list (with no spaces).
  * `keyspaces` is a list of dictionaries describing the keyspaces and their column familes.
  * `column_families` is a list of dictionaries describing the column family.
+ * `column_families` -> `index` optional attribute to set the index name and type values to be used to create the index.
+ * `column_families` -> `columns` optional attribute to describe column mapping characteristics.
+ * `column_families` -> `columns` -> `name` name of the column
+ * `column_families` -> `columns` -> `type` one of the core types: string, integer/long, float/double, boolean and null.
+ * `column_families` -> `columns` -> `raw` optional flag that indecates that a raw field should be created as well, useful for sorting a column/attribute that is searchable as well.
 
 ##Search
 Install plugin head
