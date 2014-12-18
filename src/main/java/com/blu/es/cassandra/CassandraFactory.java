@@ -127,7 +127,10 @@ public class CassandraFactory {
             case LIST: {
                 List<DataType> typeArgs = dataType.getTypeArguments();
                 List<?> raw = row.getList(columnName, typeArgs.get(0).asJavaClass());
-                value = raw != null ? raw.toString() : "";
+                StringBuilder builder = new StringBuilder(); // Not sure if this 100% correct when working with array mapping.
+                for (Iterator<?> it = raw.iterator(); it.hasNext();)
+                    builder.append(it.next()).append(it.hasNext() ? "," : "");
+                value = builder.toString();
                 break;
             }
             case MAP: {
