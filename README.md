@@ -11,9 +11,9 @@ build : mvn clean install
 
 install:
 
-- copy target/releases/cassandra-river-1.0.3-SNAPSHOT.zip into $ELASTICSEARCH_HOME/plugin/cassandra-river
+- copy target/releases/cassandra-river-1.0.4-SNAPSHOT.zip into $ELASTICSEARCH_HOME/plugin/cassandra-river
   or
-- ./plugin --url file:/river/cassandra-river-1.0.3-SNAPSHOT.zip --install cassandra-river
+- ./plugin --url file:/river/cassandra-river-1.0.4-SNAPSHOT.zip --install cassandra-river
 
 remove:
  ./plugin --remove cassandra-river
