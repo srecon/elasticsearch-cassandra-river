@@ -28,18 +28,21 @@ public class CassandraFactory {
     private static final Logger LOGGER = LoggerFactory.getLogger(CassandraFactory.class);
 
     private CassandraFactory() {    }
-    private CassandraFactory(String hostName, String port, String dcName, String username, String password){
+    private CassandraFactory(String hostName, String port, String dcName, String username, String password, Integer connectTimeoutMillis, Integer readTimeoutMillis){
         LoadBalancingPolicy loadBalancingPolicy = new DCAwareRoundRobinPolicy(dcName,2);
         PoolingOptions poolingOptions = new PoolingOptions();
 
         poolingOptions.setCoreConnectionsPerHost(HostDistance.LOCAL,10);
         poolingOptions.setMaxConnectionsPerHost(HostDistance.LOCAL, 50);
 
-        //cluster = Cluster.builder().addContactPoints(hostName).withCompression(ProtocolOptions.Compression.SNAPPY)
+        SocketOptions socketOptions = new SocketOptions().setReadTimeoutMillis(readTimeoutMillis)
+          .setConnectTimeoutMillis(connectTimeoutMillis);
+
         Cluster.Builder builder = Cluster.builder().addContactPoints(hostName)
                 .withPoolingOptions(poolingOptions)
                 .withReconnectionPolicy(new ConstantReconnectionPolicy(100L))
-                .withLoadBalancingPolicy(loadBalancingPolicy);
+                .withLoadBalancingPolicy(loadBalancingPolicy)
+                .withSocketOptions(socketOptions);
         if(!username.isEmpty() && !password.isEmpty()) {
             builder.withCredentials(username, password);
         }
@@ -51,8 +54,8 @@ public class CassandraFactory {
         }
     }
 
-    public static CassandraFactory getInstance(String hostName, String port, String dcName, String username, String password){
-        return new CassandraFactory(hostName, port, dcName, username, password);
+    public static CassandraFactory getInstance(String hostName, String port, String dcName, String username, String password, Integer connectTimeoutMillis, Integer readTimeoutMillis){
+        return new CassandraFactory(hostName, port, dcName, username, password, connectTimeoutMillis, readTimeoutMillis);
     }
 
     public Session getSession(String keySpaceName) {
@@ -81,7 +84,7 @@ public class CassandraFactory {
         if (dataType == null){
             return value;
         }
-        
+
         switch(dataType.getName()) {
             case BIGINT:
             case COUNTER: {
