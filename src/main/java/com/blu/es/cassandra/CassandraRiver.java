@@ -42,6 +42,7 @@ import java.util.concurrent.ThreadFactory;
 public class CassandraRiver extends AbstractRiverComponent implements River {
     private static final String SETTINGS_KEY_CASSANDRA = "cassandra";
     private static final String SETTINGS_KEY_CONNECTION = "connection";
+    private static final String SETTINGS_KEY_SOCKETOPTIONS = "socket_options";
     private static final String SETTINGS_KEY_KEYSPACES = "keyspaces";
     private static final String SETTINGS_KEY_SYNC = "sync";
 
@@ -78,8 +79,21 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
                 String dataCentre =  XContentMapValues.nodeStringValue(connectionSettings.get("data_centre"), "UNKNOWN_DC");
                 String username = XContentMapValues.nodeStringValue(connectionSettings.get("username"), "");
                 String password = XContentMapValues.nodeStringValue(connectionSettings.get("password"), "");
+
+                Integer connectTimeoutMillis = SocketOptions.DEFAULT_CONNECT_TIMEOUT_MILLIS;
+                Integer readTimeoutMillis = SocketOptions.DEFAULT_READ_TIMEOUT_MILLIS;
+                if(connectionSettings != null && connectionSettings.containsKey(SETTINGS_KEY_SOCKETOPTIONS)) {
+                  Map<String, Object> socketOptions = (Map<String, Object>) connectionSettings.get(SETTINGS_KEY_SOCKETOPTIONS);
+                  if(socketOptions.containsKey("connect_timeout_millis")) {
+                    connectTimeoutMillis = XContentMapValues.nodeIntegerValue(socketOptions.get("connect_timeout_millis"));
+                  }
+                  if(socketOptions.containsKey("read_timeout_millis")) {
+                    readTimeoutMillis = XContentMapValues.nodeIntegerValue(socketOptions.get("read_timeout_millis"));
+                  }
+                }
+
                 // init factory
-                cassandraFactory = CassandraFactory.getInstance(hosts, port, dataCentre, username, password);
+                cassandraFactory = CassandraFactory.getInstance(hosts, port, dataCentre, username, password, connectTimeoutMillis, readTimeoutMillis);
             }
             if(cassandraSettings != null && cassandraSettings.containsKey(SETTINGS_KEY_KEYSPACES))
             {
