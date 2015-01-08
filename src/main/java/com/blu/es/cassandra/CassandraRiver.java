@@ -103,7 +103,7 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
             if(cassandraSettings != null && cassandraSettings.containsKey(SETTINGS_KEY_SYNC))
             {
                 LOGGER.debug("Parsing sync data");
-                Map<String, Object> syncSettings = (Map<String, Object>) cassandraSettings.get(SETTINGS_KEY_CONNECTION);
+                Map<String, Object> syncSettings = (Map<String, Object>) cassandraSettings.get(SETTINGS_KEY_SYNC);
                 this.batchSize = XContentMapValues.nodeIntegerValue(syncSettings.get("batch_size"), 10000);
                 this.schedule = XContentMapValues.nodeStringValue(syncSettings.get("cron"), "0/60 * * * * ?"); // DEFAULT every 60 second
             }
