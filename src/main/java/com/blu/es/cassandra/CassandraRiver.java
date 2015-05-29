@@ -4,12 +4,12 @@ import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 
 import com.datastax.driver.core.*;
 
-import org.elasticsearch.action.ListenableActionFuture;
+import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
-import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsRequestBuilder;
 import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsResponse;
 import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequestBuilder;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
+import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.client.*;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.ThreadFactoryBuilder;
@@ -349,17 +349,20 @@ public class CassandraRiver extends AbstractRiverComponent implements River {
 
         private boolean saveToEs(BulkRequestBuilder bulkRequestBuilder){
             LOGGER.debug("Inserting {} keys in ES[{}]", bulkRequestBuilder.numberOfActions(), this.indexName);
-            try{
-                bulkRequestBuilder.execute().addListener(new Runnable() {
-                    public void run() {
-                        LOGGER.debug("Processing Done!!");
-                    }
-                });
-            } catch(Exception e){
-                LOGGER.warn("{} had an Exception in persisting: {}", this.indexName, e);
-            }
-                return false;
-            }
+            bulkRequestBuilder.execute().addListener(new ActionListener<BulkResponse>() {
+                @Override
+                public void onResponse(BulkResponse bulkItemResponses) {
+                    LOGGER.debug("Processing Done!!");
+                }
+
+                @Override
+                public void onFailure(Throwable throwable) {
+                    LOGGER.warn("{} had an Exception in persisting: {}", indexName, throwable);
+                }
+            });
+
+            return false;
+        }
 
     }
 
