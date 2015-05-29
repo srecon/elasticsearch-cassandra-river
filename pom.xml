@@ -12,7 +12,7 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <elasticsearch.version>1.2.1</elasticsearch.version>
+    <elasticsearch.version>1.5.2</elasticsearch.version>
     <cassandra.version>2.0.6</cassandra.version>
   </properties>
 
