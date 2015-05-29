@@ -4,8 +4,6 @@ import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.ConstantReconnectionPolicy;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
-import com.google.common.base.Splitter;
-import com.google.common.collect.Iterables;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -150,7 +148,7 @@ public class CassandraFactory {
             }
             case TIMESTAMP: {
                 Date raw = row.getDate(columnName);
-                value = raw != null ? raw.toString() : "";
+                value = raw != null ? String.valueOf(raw.getTime()) : "";
                 break;
             }
             case TIMEUUID:
